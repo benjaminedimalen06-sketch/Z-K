@@ -226,19 +226,19 @@
     <div class="success" id="success"></div>
     <div class="info" id="info"></div>
 
-    <form id="registerForm">
+    <form id="registerForm" autocomplete="off">
       <label>Name</label>
-      <input type="text" id="name" required minlength="3" placeholder="Enter your name" autocomplete="name">
+      <input type="text" id="name" required minlength="3" placeholder="Enter your name" autocomplete="off">
 
       <label>Gmail</label>
-      <input type="email" id="gmail" required placeholder="Enter your Gmail" autocomplete="email">
+      <input type="email" id="gmail" required placeholder="Enter your Gmail" autocomplete="off">
 
       <label>Password</label>
       <input type="password" id="password" required minlength="6" placeholder="Enter your password" autocomplete="new-password">
       <p class="hint">Minimum 6 characters — ito rin ang gagamitin mo sa login</p>
 
       <label>Age</label>
-      <input type="number" id="age" required min="10" max="100" placeholder="Enter your age">
+      <input type="number" id="age" required min="10" max="100" placeholder="Enter your age" autocomplete="off">
 
       <button type="submit" id="submitBtn">✨ Register</button>
     </form>
@@ -253,11 +253,20 @@
   <script>
     const API_BASE = window.location.origin;
 
+    // AUTOMATIC WARMUP — wake up Render server
+    fetch(API_BASE + '/api/list').catch(() => {});
+
+    // Save last name
+    const lastName = localStorage.getItem('zk_last_name');
+    if (lastName) {
+      document.getElementById('name').value = lastName;
+    }
+
     function showError(msg) {
       const errorBox = document.getElementById('error');
       errorBox.textContent = '❌ ' + msg;
       errorBox.classList.add('show');
-      setTimeout(() => errorBox.classList.remove('show'), 6000);
+      setTimeout(() => errorBox.classList.remove('show'), 8000);
     }
 
     function showSuccess(msg) {
@@ -276,15 +285,21 @@
       document.getElementById('loadingOverlay').classList.remove('show');
     }
 
-    async function fetchWithRetry(url, options, retries = 3) {
-      for (let i = 0; i < retries; i++) {
-        try {
-          const res = await fetch(url, options);
-          return res;
-        } catch (err) {
-          if (i === retries - 1) throw err;
-          await new Promise(r => setTimeout(r, 2000));
-        }
+    // Custom fetch with timeout
+    async function fetchWithTimeout(url, options = {}, timeoutMs = 60000) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      
+      try {
+        const res = await fetch(url, {
+          ...options,
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        return res;
+      } catch (err) {
+        clearTimeout(timeoutId);
+        throw err;
       }
     }
 
@@ -297,6 +312,7 @@
       const password = document.getElementById('password').value;
       const age = parseInt(document.getElementById('age').value);
 
+      // Client-side validation
       if (name.length < 3) return showError('Name must be at least 3 characters');
       if (!gmail.includes('@')) return showError('Invalid Gmail');
       if (password.length < 6) return showError('Password must be at least 6 characters');
@@ -305,50 +321,65 @@
       btn.disabled = true;
       btn.textContent = '⏳ Creating...';
       
-      showLoading('CREATING ACCOUNT...', 'Connecting to server');
+      showLoading('CREATING ACCOUNT...', 'Please wait');
 
       try {
-        const res = await fetchWithRetry(API_BASE + '/api/register', {
+        // Add cache-busting parameter
+        const url = API_BASE + '/api/register?t=' + Date.now();
+        
+        const res = await fetchWithTimeout(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
           body: JSON.stringify({ name, gmail, password, age })
-        }, 3);
+        }, 60000);
 
+        // Check kung JSON
         const contentType = res.headers.get('content-type') || '';
+        
         if (!contentType.includes('application/json')) {
+          const text = await res.text();
+          console.log('Non-JSON response:', text.substring(0, 200));
           hideLoading();
-          throw new Error('Server error: hindi JSON ang response');
+          throw new Error('Server error (' + res.status + '): hindi JSON ang response');
         }
 
         const data = await res.json();
+        console.log('Response:', data);
 
         if (!res.ok || !data.success) {
           hideLoading();
           throw new Error(data.error || 'Registration failed');
         }
 
+        // Save name for login page
         localStorage.setItem('zk_last_name', name);
 
         showLoading('ACCOUNT CREATED!', 'Redirecting to login...');
         showSuccess('Account created successfully!');
+        btn.textContent = '✅ Success!';
 
         setTimeout(() => {
           window.location.href = '/';
         }, 2000);
       } catch (err) {
         hideLoading();
+        console.error('Register error:', err);
+        
         let errorMsg = err.message;
-        if (err.message === 'fetch failed' || err.message.includes('Failed to fetch')) {
-          errorMsg = 'Hindi maka-connect sa server. Hintayin 30-60s at i-try ulit.';
+        
+        if (err.name === 'AbortError') {
+          errorMsg = 'Request timeout (60s). Nag-sleep ang Render server. Hintayin 30-60s at i-try ulit.';
+        } else if (err.message === 'fetch failed' || err.message.includes('Failed to fetch')) {
+          errorMsg = 'Hindi maka-connect sa server. Nag-sleep ang Render server (free tier). Hintayin 30-60s at i-try ulit.';
         }
+        
         showError(errorMsg);
         btn.disabled = false;
         btn.textContent = '✨ Register';
       }
-    });
-
-    window.addEventListener('load', () => {
-      fetch(API_BASE + '/api/list').catch(() => {});
     });
   </script>
 </body>
