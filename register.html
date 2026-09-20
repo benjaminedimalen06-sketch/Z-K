@@ -104,12 +104,6 @@
       color: #00ff88;
     }
     .success.show { display: block; animation: fadeUp 0.5s ease; }
-    .info {
-      background: linear-gradient(135deg, rgba(0, 170, 255, 0.15), rgba(0, 170, 255, 0.05));
-      border: 1px solid rgba(0, 170, 255, 0.3);
-      color: #66ccff;
-    }
-    .info.show { display: block; animation: fadeUp 0.5s ease; }
     @keyframes shake {
       0%, 100% { transform: translateX(0); }
       25% { transform: translateX(-10px); }
@@ -172,15 +166,10 @@
       font-size: 11px;
     }
     .loading-overlay {
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(5, 5, 5, 0.95);
-      backdrop-filter: blur(20px);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      flex-direction: column;
-      z-index: 9999;
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(5, 5, 5, 0.95); backdrop-filter: blur(20px);
+      display: none; align-items: center; justify-content: center;
+      flex-direction: column; z-index: 9999;
     }
     .loading-overlay.show { display: flex; }
     .loading-spinner {
@@ -192,17 +181,8 @@
       margin-bottom: 24px;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .loading-text {
-      color: #00ff88;
-      font-size: 16px;
-      font-weight: 700;
-      letter-spacing: 2px;
-    }
-    .loading-subtext {
-      color: #666;
-      font-size: 13px;
-      margin-top: 8px;
-    }
+    .loading-text { color: #00ff88; font-size: 16px; font-weight: 700; letter-spacing: 2px; }
+    .loading-subtext { color: #666; font-size: 13px; margin-top: 8px; }
   </style>
 </head>
 <body>
@@ -216,171 +196,120 @@
   </div>
 
   <div class="container">
-    <div class="logo">
-      <div class="logo-icon">Z-K</div>
-    </div>
+    <div class="logo"><div class="logo-icon">Z-K</div></div>
     <h1>Z-K</h1>
     <p class="subtitle">Create your account</p>
 
     <div class="error" id="error"></div>
     <div class="success" id="success"></div>
-    <div class="info" id="info"></div>
 
     <form id="registerForm" autocomplete="off">
       <label>Name</label>
       <input type="text" id="name" required minlength="3" placeholder="Enter your name" autocomplete="off">
 
-      <label>Gmail</label>
-      <input type="email" id="gmail" required placeholder="Enter your Gmail" autocomplete="off">
-
       <label>Password</label>
       <input type="password" id="password" required minlength="6" placeholder="Enter your password" autocomplete="new-password">
       <p class="hint">Minimum 6 characters — ito rin ang gagamitin mo sa login</p>
-
-      <label>Age</label>
-      <input type="number" id="age" required min="10" max="100" placeholder="Enter your age" autocomplete="off">
 
       <button type="submit" id="submitBtn">✨ Register</button>
     </form>
 
     <p class="link">Already have an account? <a href="/">Login</a></p>
-
-    <div class="footer">
-      © 2026 Z-K — All rights reserved
-    </div>
+    <div class="footer">© 2026 Z-K — All rights reserved</div>
   </div>
 
   <script>
     const API_BASE = window.location.origin;
 
-    // AUTOMATIC WARMUP — wake up Render server
-    fetch(API_BASE + '/api/list').catch(() => {});
-
-    // Save last name
+    // Auto-fill last name
     const lastName = localStorage.getItem('zk_last_name');
-    if (lastName) {
-      document.getElementById('name').value = lastName;
-    }
+    if (lastName) document.getElementById('name').value = lastName;
 
     function showError(msg) {
-      const errorBox = document.getElementById('error');
-      errorBox.textContent = '❌ ' + msg;
-      errorBox.classList.add('show');
-      setTimeout(() => errorBox.classList.remove('show'), 8000);
+      const b = document.getElementById('error');
+      b.textContent = '❌ ' + msg;
+      b.classList.add('show');
+      setTimeout(() => b.classList.remove('show'), 6000);
     }
-
     function showSuccess(msg) {
-      const successBox = document.getElementById('success');
-      successBox.textContent = '✅ ' + msg;
-      successBox.classList.add('show');
+      const b = document.getElementById('success');
+      b.textContent = '✅ ' + msg;
+      b.classList.add('show');
     }
-
     function showLoading(text, subtext) {
       document.getElementById('loadingText').textContent = text;
       document.getElementById('loadingSubtext').textContent = subtext || '';
       document.getElementById('loadingOverlay').classList.add('show');
     }
-
     function hideLoading() {
       document.getElementById('loadingOverlay').classList.remove('show');
     }
 
-    // Custom fetch with timeout
-    async function fetchWithTimeout(url, options = {}, timeoutMs = 60000) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-      
-      try {
-        const res = await fetch(url, {
-          ...options,
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        return res;
-      } catch (err) {
-        clearTimeout(timeoutId);
-        throw err;
+    async function fetchWithRetry(url, options, retries = 3) {
+      for (let i = 0; i < retries; i++) {
+        try {
+          const res = await fetch(url, options);
+          return res;
+        } catch (err) {
+          if (i === retries - 1) throw err;
+          await new Promise(r => setTimeout(r, 2000));
+        }
       }
     }
 
     document.getElementById('registerForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const btn = document.getElementById('submitBtn');
-      
       const name = document.getElementById('name').value.trim();
-      const gmail = document.getElementById('gmail').value.trim();
       const password = document.getElementById('password').value;
-      const age = parseInt(document.getElementById('age').value);
 
-      // Client-side validation
       if (name.length < 3) return showError('Name must be at least 3 characters');
-      if (!gmail.includes('@')) return showError('Invalid Gmail');
       if (password.length < 6) return showError('Password must be at least 6 characters');
-      if (age < 10 || age > 100) return showError('Age must be 10-100');
 
       btn.disabled = true;
       btn.textContent = '⏳ Creating...';
-      
-      showLoading('CREATING ACCOUNT...', 'Please wait');
+      showLoading('CREATING ACCOUNT...', 'Connecting to server');
 
       try {
-        // Add cache-busting parameter
-        const url = API_BASE + '/api/register?t=' + Date.now();
-        
-        const res = await fetchWithTimeout(url, {
+        const res = await fetchWithRetry(API_BASE + '/api/register', {
           method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          body: JSON.stringify({ name, gmail, password, age })
-        }, 60000);
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, password })
+        }, 3);
 
-        // Check kung JSON
-        const contentType = res.headers.get('content-type') || '';
-        
-        if (!contentType.includes('application/json')) {
-          const text = await res.text();
-          console.log('Non-JSON response:', text.substring(0, 200));
+        const ct = res.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) {
           hideLoading();
-          throw new Error('Server error (' + res.status + '): hindi JSON ang response');
+          throw new Error('Server error: hindi JSON response');
         }
 
         const data = await res.json();
-        console.log('Response:', data);
-
         if (!res.ok || !data.success) {
           hideLoading();
           throw new Error(data.error || 'Registration failed');
         }
 
-        // Save name for login page
         localStorage.setItem('zk_last_name', name);
+        localStorage.setItem('zk_token', data.token);
+        localStorage.setItem('zk_user', JSON.stringify(data.user));
 
-        showLoading('ACCOUNT CREATED!', 'Redirecting to login...');
-        showSuccess('Account created successfully!');
-        btn.textContent = '✅ Success!';
+        showLoading('ACCOUNT CREATED!', 'Redirecting to dashboard...');
+        showSuccess('Account created!');
 
-        setTimeout(() => {
-          window.location.href = '/';
-        }, 2000);
+        setTimeout(() => window.location.href = '/dashboard.html', 1500);
       } catch (err) {
         hideLoading();
-        console.error('Register error:', err);
-        
-        let errorMsg = err.message;
-        
-        if (err.name === 'AbortError') {
-          errorMsg = 'Request timeout (60s). Nag-sleep ang Render server. Hintayin 30-60s at i-try ulit.';
-        } else if (err.message === 'fetch failed' || err.message.includes('Failed to fetch')) {
-          errorMsg = 'Hindi maka-connect sa server. Nag-sleep ang Render server (free tier). Hintayin 30-60s at i-try ulit.';
+        let msg = err.message;
+        if (msg === 'fetch failed' || msg.includes('Failed to fetch')) {
+          msg = 'Hindi maka-connect sa server. Hintayin 30-60s at i-try ulit.';
         }
-        
-        showError(errorMsg);
+        showError(msg);
         btn.disabled = false;
         btn.textContent = '✨ Register';
       }
     });
+
+    fetch(API_BASE + '/api/list').catch(() => {});
   </script>
 </body>
 </html>
