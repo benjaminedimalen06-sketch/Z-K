@@ -83,7 +83,7 @@
       text-transform: uppercase;
       margin-bottom: 40px;
     }
-    .error, .success, .info {
+    .error, .info {
       padding: 14px 20px;
       border-radius: 12px;
       margin-bottom: 20px;
@@ -98,12 +98,6 @@
       color: #ff8888;
     }
     .error.show { display: block; animation: shake 0.5s ease; }
-    .success {
-      background: linear-gradient(135deg, rgba(0, 255, 136, 0.15), rgba(0, 255, 136, 0.05));
-      border: 1px solid rgba(0, 255, 136, 0.3);
-      color: #00ff88;
-    }
-    .success.show { display: block; animation: fadeUp 0.5s ease; }
     .info {
       background: linear-gradient(135deg, rgba(0, 170, 255, 0.15), rgba(0, 170, 255, 0.05));
       border: 1px solid rgba(0, 170, 255, 0.3);
@@ -170,7 +164,6 @@
       color: #444;
       font-size: 11px;
     }
-    /* LOADING OVERLAY */
     .loading-overlay {
       position: fixed;
       top: 0; left: 0; right: 0; bottom: 0;
@@ -223,11 +216,10 @@
     <p class="subtitle">Script Protection System</p>
 
     <div class="error" id="error"></div>
-    <div class="info" id="info"></div>
 
-    <form id="loginForm">
+    <form id="loginForm" autocomplete="off">
       <label>Name</label>
-      <input type="text" id="name" required placeholder="Enter your name" autocomplete="username">
+      <input type="text" id="name" required placeholder="Enter your name" autocomplete="off">
 
       <label>Password</label>
       <input type="password" id="password" required placeholder="Enter your password" autocomplete="current-password">
@@ -245,32 +237,25 @@
   <script>
     const API_BASE = window.location.origin;
 
-    // AUTO-REDIRECT kung naka-login na
+    // Auto-redirect kung naka-login na
     if (localStorage.getItem('zk_token')) {
       window.location.href = '/dashboard.html';
     }
 
-    // AUTO-FILL ng last registered name
+    // Auto-fill ng last name
     const lastName = localStorage.getItem('zk_last_name');
     if (lastName) {
       document.getElementById('name').value = lastName;
     }
 
+    // Warmup server
+    fetch(API_BASE + '/api/list').catch(() => {});
+
     function showError(msg) {
       const errorBox = document.getElementById('error');
       errorBox.textContent = '❌ ' + msg;
       errorBox.classList.add('show');
-      setTimeout(() => errorBox.classList.remove('show'), 6000);
-    }
-
-    function showInfo(msg) {
-      const infoBox = document.getElementById('info');
-      infoBox.textContent = '⏳ ' + msg;
-      infoBox.classList.add('show');
-    }
-
-    function hideInfo() {
-      document.getElementById('info').classList.remove('show');
+      setTimeout(() => errorBox.classList.remove('show'), 8000);
     }
 
     function showLoading(text, subtext) {
@@ -283,15 +268,20 @@
       document.getElementById('loadingOverlay').classList.remove('show');
     }
 
-    async function fetchWithRetry(url, options, retries = 3) {
-      for (let i = 0; i < retries; i++) {
-        try {
-          const res = await fetch(url, options);
-          return res;
-        } catch (err) {
-          if (i === retries - 1) throw err;
-          await new Promise(r => setTimeout(r, 2000));
-        }
+    async function fetchWithTimeout(url, options = {}, timeoutMs = 60000) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      
+      try {
+        const res = await fetch(url, {
+          ...options,
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        return res;
+      } catch (err) {
+        clearTimeout(timeoutId);
+        throw err;
       }
     }
 
@@ -307,29 +297,38 @@
       btn.disabled = true;
       btn.textContent = '⏳ Logging in...';
       
-      showLoading('LOGGING IN...', 'Connecting to server');
+      showLoading('LOGGING IN...', 'Please wait');
 
       try {
-        const res = await fetchWithRetry(API_BASE + '/api/login', {
+        const url = API_BASE + '/api/login?t=' + Date.now();
+        
+        const res = await fetchWithTimeout(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
           body: JSON.stringify({ name, password })
-        }, 3);
+        }, 60000);
 
         const contentType = res.headers.get('content-type') || '';
+        
         if (!contentType.includes('application/json')) {
+          const text = await res.text();
+          console.log('Non-JSON response:', text.substring(0, 200));
           hideLoading();
-          throw new Error('Server error: hindi JSON ang response. Subukan ulit mamaya.');
+          throw new Error('Server error (' + res.status + '): hindi JSON ang response');
         }
 
         const data = await res.json();
+        console.log('Login response:', data);
 
         if (!res.ok || !data.success) {
           hideLoading();
           throw new Error(data.error || 'Login failed');
         }
 
-        // I-save ang credentials para auto-login sa susunod
+        // Save credentials
         localStorage.setItem('zk_token', data.token);
         localStorage.setItem('zk_user', JSON.stringify(data.user));
         localStorage.setItem('zk_last_name', name);
@@ -341,19 +340,20 @@
         }, 1200);
       } catch (err) {
         hideLoading();
+        console.error('Login error:', err);
+        
         let errorMsg = err.message;
-        if (err.message === 'fetch failed' || err.message.includes('Failed to fetch')) {
-          errorMsg = 'Hindi maka-connect sa server. Nag-sleep ang Render (free tier). Hintayin 30-60s at i-try ulit.';
+        
+        if (err.name === 'AbortError') {
+          errorMsg = 'Request timeout (60s). Nag-sleep ang Render server. Hintayin 30-60s at i-try ulit.';
+        } else if (err.message === 'fetch failed' || err.message.includes('Failed to fetch')) {
+          errorMsg = 'Hindi maka-connect sa server. Nag-sleep ang Render server (free tier). Hintayin 30-60s at i-try ulit.';
         }
+        
         showError(errorMsg);
         btn.disabled = false;
         btn.textContent = '🔐 Login';
       }
-    });
-
-    // Warmup server on load
-    window.addEventListener('load', () => {
-      fetch(API_BASE + '/api/list').catch(() => {});
     });
   </script>
 </body>
