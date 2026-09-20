@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import ws from 'ws';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,7 +20,12 @@ app.use(express.static(__dirname));
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SECRET
+  process.env.SUPABASE_SECRET,
+  {
+    realtime: {
+      transport: ws
+    }
+  }
 );
 
 const JWT_SECRET = process.env.JWT_SECRET || 'z-k-secret-change-me';
