@@ -171,11 +171,50 @@
       color: #444;
       font-size: 11px;
     }
+    /* LOADING OVERLAY */
+    .loading-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(5, 5, 5, 0.95);
+      backdrop-filter: blur(20px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      z-index: 9999;
+    }
+    .loading-overlay.show { display: flex; }
+    .loading-spinner {
+      width: 60px; height: 60px;
+      border: 4px solid rgba(0, 255, 136, 0.2);
+      border-top-color: #00ff88;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-bottom: 24px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text {
+      color: #00ff88;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 2px;
+    }
+    .loading-subtext {
+      color: #666;
+      font-size: 13px;
+      margin-top: 8px;
+    }
   </style>
 </head>
 <body>
   <div class="orb orb-1"></div>
   <div class="orb orb-2"></div>
+
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-spinner"></div>
+    <div class="loading-text" id="loadingText">CREATING ACCOUNT...</div>
+    <div class="loading-subtext" id="loadingSubtext">Please wait</div>
+  </div>
 
   <div class="container">
     <div class="logo">
@@ -190,17 +229,17 @@
 
     <form id="registerForm">
       <label>Name</label>
-      <input type="text" id="name" required minlength="3" placeholder="Enter your name" autocomplete="name" value="Zyrox">
+      <input type="text" id="name" required minlength="3" placeholder="Enter your name" autocomplete="name">
 
       <label>Gmail</label>
-      <input type="email" id="gmail" required placeholder="Enter your Gmail" autocomplete="email" value="benjaminedimalen06@gmail.com">
+      <input type="email" id="gmail" required placeholder="Enter your Gmail" autocomplete="email">
 
       <label>Password</label>
       <input type="password" id="password" required minlength="6" placeholder="Enter your password" autocomplete="new-password">
-      <p class="hint">Minimum 6 characters</p>
+      <p class="hint">Minimum 6 characters — ito rin ang gagamitin mo sa login</p>
 
       <label>Age</label>
-      <input type="number" id="age" required min="10" max="100" placeholder="Enter your age" value="21">
+      <input type="number" id="age" required min="10" max="100" placeholder="Enter your age">
 
       <button type="submit" id="submitBtn">✨ Register</button>
     </form>
@@ -215,21 +254,27 @@
   <script>
     const API_BASE = window.location.origin;
 
-    async function warmupServer() {
-      try {
-        const info = document.getElementById('info');
-        info.textContent = '⏳ Waking up server...';
-        info.classList.add('show');
-        
-        await fetch(API_BASE + '/api/list', { 
-          method: 'GET',
-          headers: { 'Cache-Control': 'no-cache' }
-        });
-        
-        info.classList.remove('show');
-      } catch (err) {
-        document.getElementById('info').classList.remove('show');
-      }
+    function showError(msg) {
+      const errorBox = document.getElementById('error');
+      errorBox.textContent = '❌ ' + msg;
+      errorBox.classList.add('show');
+      setTimeout(() => errorBox.classList.remove('show'), 6000);
+    }
+
+    function showSuccess(msg) {
+      const successBox = document.getElementById('success');
+      successBox.textContent = '✅ ' + msg;
+      successBox.classList.add('show');
+    }
+
+    function showLoading(text, subtext) {
+      document.getElementById('loadingText').textContent = text;
+      document.getElementById('loadingSubtext').textContent = subtext || '';
+      document.getElementById('loadingOverlay').classList.add('show');
+    }
+
+    function hideLoading() {
+      document.getElementById('loadingOverlay').classList.remove('show');
     }
 
     async function fetchWithRetry(url, options, retries = 3) {
@@ -239,7 +284,7 @@
           return res;
         } catch (err) {
           if (i === retries - 1) throw err;
-          await new Promise(r => setTimeout(r, 3000));
+          await new Promise(r => setTimeout(r, 2000));
         }
       }
     }
@@ -247,68 +292,66 @@
     document.getElementById('registerForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const btn = document.getElementById('submitBtn');
-      const errorBox = document.getElementById('error');
-      const successBox = document.getElementById('success');
-      const infoBox = document.getElementById('info');
       
+      const name = document.getElementById('name').value.trim();
+      const gmail = document.getElementById('gmail').value.trim();
+      const password = document.getElementById('password').value;
+      const age = parseInt(document.getElementById('age').value);
+
+      if (name.length < 3) return showError('Name must be at least 3 characters');
+      if (!gmail.includes('@')) return showError('Invalid Gmail');
+      if (password.length < 6) return showError('Password must be at least 6 characters');
+      if (age < 10 || age > 100) return showError('Age must be 10-100');
+
       btn.disabled = true;
       btn.textContent = '⏳ Creating...';
-      errorBox.classList.remove('show');
-      successBox.classList.remove('show');
-      infoBox.classList.remove('show');
-
-      const payload = {
-        name: document.getElementById('name').value.trim(),
-        gmail: document.getElementById('gmail').value.trim(),
-        password: document.getElementById('password').value,
-        age: parseInt(document.getElementById('age').value)
-      };
+      
+      showLoading('CREATING ACCOUNT...', 'Connecting to server');
 
       try {
-        infoBox.textContent = '⏳ Connecting to server...';
-        infoBox.classList.add('show');
-
         const res = await fetchWithRetry(API_BASE + '/api/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          body: JSON.stringify({ name, gmail, password, age })
         }, 3);
 
-        infoBox.classList.remove('show');
-
-        // I-check kung JSON ang response
         const contentType = res.headers.get('content-type') || '';
         if (!contentType.includes('application/json')) {
-          throw new Error('Server error: hindi JSON ang response. I-check ang Render logs.');
+          hideLoading();
+          throw new Error('Server error: hindi JSON ang response. Subukan ulit mamaya.');
         }
 
         const data = await res.json();
 
         if (!res.ok || !data.success) {
+          hideLoading();
           throw new Error(data.error || 'Registration failed');
         }
 
-        successBox.textContent = '✅ Account created! Redirecting to login...';
-        successBox.classList.add('show');
-        localStorage.setItem('zk_last_name', payload.name);
-        setTimeout(() => window.location.href = '/', 1500);
+        // I-save ang name para sa auto-fill sa login page
+        localStorage.setItem('zk_last_name', name);
+
+        showLoading('ACCOUNT CREATED!', 'Redirecting to login...');
+        showSuccess('Account created successfully!');
+
+        setTimeout(() => {
+          window.location.href = '/';
+        }, 2000);
       } catch (err) {
-        infoBox.classList.remove('show');
+        hideLoading();
         let errorMsg = err.message;
-        
         if (err.message === 'fetch failed' || err.message.includes('Failed to fetch')) {
-          errorMsg = 'Hindi maka-connect sa server. Nag-sleep ang Render server (free tier). Hintayin 30-60 seconds at i-try ulit.';
+          errorMsg = 'Hindi maka-connect sa server. Nag-sleep ang Render (free tier). Hintayin 30-60s at i-try ulit.';
         }
-        
-        errorBox.textContent = '❌ ' + errorMsg;
-        errorBox.classList.add('show');
+        showError(errorMsg);
         btn.disabled = false;
         btn.textContent = '✨ Register';
       }
     });
 
+    // Warmup server on load
     window.addEventListener('load', () => {
-      warmupServer();
+      fetch(API_BASE + '/api/list').catch(() => {});
     });
   </script>
 </body>
