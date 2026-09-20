@@ -49,7 +49,7 @@
       animation: fadeUp 0.6s cubic-bezier(0.4, 0, 0.2, 1);
     }
     @keyframes fadeUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
-    .logo { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+    .logo { display: flex; align-items: center; justify-content: center; margin-bottom: 8px; }
     .logo-icon {
       width: 56px; height: 56px;
       background: linear-gradient(135deg, #00ff88, #00cc6a);
@@ -83,30 +83,33 @@
       text-transform: uppercase;
       margin-bottom: 40px;
     }
-    .error {
-      background: linear-gradient(135deg, rgba(255, 68, 68, 0.15), rgba(255, 68, 68, 0.05));
-      border: 1px solid rgba(255, 68, 68, 0.3);
-      color: #ff8888;
+    .error, .success, .info {
       padding: 14px 20px;
       border-radius: 12px;
       margin-bottom: 20px;
       font-size: 13px;
       font-weight: 600;
       display: none;
+      line-height: 1.5;
+    }
+    .error {
+      background: linear-gradient(135deg, rgba(255, 68, 68, 0.15), rgba(255, 68, 68, 0.05));
+      border: 1px solid rgba(255, 68, 68, 0.3);
+      color: #ff8888;
     }
     .error.show { display: block; animation: shake 0.5s ease; }
     .success {
       background: linear-gradient(135deg, rgba(0, 255, 136, 0.15), rgba(0, 255, 136, 0.05));
       border: 1px solid rgba(0, 255, 136, 0.3);
       color: #00ff88;
-      padding: 14px 20px;
-      border-radius: 12px;
-      margin-bottom: 20px;
-      font-size: 13px;
-      font-weight: 600;
-      display: none;
     }
     .success.show { display: block; animation: fadeUp 0.5s ease; }
+    .info {
+      background: linear-gradient(135deg, rgba(0, 170, 255, 0.15), rgba(0, 170, 255, 0.05));
+      border: 1px solid rgba(0, 170, 255, 0.3);
+      color: #66ccff;
+    }
+    .info.show { display: block; animation: fadeUp 0.5s ease; }
     @keyframes shake {
       0%, 100% { transform: translateX(0); }
       25% { transform: translateX(-10px); }
@@ -183,20 +186,21 @@
 
     <div class="error" id="error"></div>
     <div class="success" id="success"></div>
+    <div class="info" id="info"></div>
 
     <form id="registerForm">
       <label>Name</label>
-      <input type="text" id="name" required minlength="3" placeholder="Enter your name" autocomplete="name">
+      <input type="text" id="name" required minlength="3" placeholder="Enter your name" autocomplete="name" value="Zyrox">
 
       <label>Gmail</label>
-      <input type="email" id="gmail" required placeholder="Enter your Gmail" autocomplete="email">
+      <input type="email" id="gmail" required placeholder="Enter your Gmail" autocomplete="email" value="benjaminedimalen06@gmail.com">
 
       <label>Password</label>
       <input type="password" id="password" required minlength="6" placeholder="Enter your password" autocomplete="new-password">
       <p class="hint">Minimum 6 characters</p>
 
       <label>Age</label>
-      <input type="number" id="age" required min="10" max="100" placeholder="Enter your age">
+      <input type="number" id="age" required min="10" max="100" placeholder="Enter your age" value="21">
 
       <button type="submit" id="submitBtn">✨ Register</button>
     </form>
@@ -209,38 +213,98 @@
   </div>
 
   <script>
+    const API_BASE = window.location.origin;
+
+    async function warmupServer() {
+      try {
+        const info = document.getElementById('info');
+        info.textContent = '⏳ Waking up server... (this may take 30-60s on first load)';
+        info.classList.add('show');
+        
+        const res = await fetch(API_BASE + '/api/list', { 
+          method: 'GET',
+          headers: { 'Cache-Control': 'no-cache' }
+        });
+        info.classList.remove('show');
+        return true;
+      } catch (err) {
+        console.log('Warmup failed:', err);
+        document.getElementById('info').classList.remove('show');
+        return false;
+      }
+    }
+
+    async function fetchWithRetry(url, options, retries = 2) {
+      for (let i = 0; i < retries; i++) {
+        try {
+          const res = await fetch(url, options);
+          return res;
+        } catch (err) {
+          console.log(`Attempt ${i + 1} failed:`, err);
+          if (i === retries - 1) throw err;
+          await new Promise(r => setTimeout(r, 3000));
+        }
+      }
+    }
+
     document.getElementById('registerForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const btn = document.getElementById('submitBtn');
       const errorBox = document.getElementById('error');
       const successBox = document.getElementById('success');
+      const infoBox = document.getElementById('info');
+      
       btn.disabled = true;
       btn.textContent = '⏳ Creating...';
       errorBox.classList.remove('show');
       successBox.classList.remove('show');
+      infoBox.classList.remove('show');
+
+      const payload = {
+        name: document.getElementById('name').value.trim(),
+        gmail: document.getElementById('gmail').value.trim(),
+        password: document.getElementById('password').value,
+        age: parseInt(document.getElementById('age').value)
+      };
 
       try {
-        const res = await fetch('/api/register', {
+        infoBox.textContent = '⏳ Connecting to server...';
+        infoBox.classList.add('show');
+
+        const res = await fetchWithRetry(API_BASE + '/api/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: document.getElementById('name').value.trim(),
-            gmail: document.getElementById('gmail').value.trim(),
-            password: document.getElementById('password').value,
-            age: parseInt(document.getElementById('age').value)
-          })
-        });
+          body: JSON.stringify(payload)
+        }, 3);
+
+        infoBox.classList.remove('show');
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Registration failed');
+
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Registration failed');
+        }
+
         successBox.textContent = '✅ Account created! Redirecting to login...';
         successBox.classList.add('show');
         setTimeout(() => window.location.href = '/', 1500);
       } catch (err) {
-        errorBox.textContent = '❌ ' + err.message;
+        infoBox.classList.remove('show');
+        let errorMsg = err.message;
+        
+        if (err.message === 'fetch failed' || err.message.includes('Failed to fetch')) {
+          errorMsg = 'Hindi maka-connect sa server. Nag-sleep ang Render server (free tier). Hintayin 30-60 seconds at i-try ulit.';
+        }
+        
+        errorBox.textContent = '❌ ' + errorMsg;
         errorBox.classList.add('show');
         btn.disabled = false;
         btn.textContent = '✨ Register';
       }
+    });
+
+    // Warmup server on page load
+    window.addEventListener('load', () => {
+      warmupServer();
     });
   </script>
 </body>
