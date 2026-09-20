@@ -49,7 +49,7 @@
       animation: fadeUp 0.6s cubic-bezier(0.4, 0, 0.2, 1);
     }
     @keyframes fadeUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
-    .logo { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+    .logo { display: flex; align-items: center; justify-content: center; margin-bottom: 8px; }
     .logo-icon {
       width: 56px; height: 56px;
       background: linear-gradient(135deg, #00ff88, #00cc6a);
@@ -83,19 +83,27 @@
       text-transform: uppercase;
       margin-bottom: 40px;
     }
-    .error {
-      background: linear-gradient(135deg, rgba(255, 68, 68, 0.15), rgba(255, 68, 68, 0.05));
-      border: 1px solid rgba(255, 68, 68, 0.3);
-      color: #ff8888;
+    .error, .info {
       padding: 14px 20px;
       border-radius: 12px;
       margin-bottom: 20px;
       font-size: 13px;
       font-weight: 600;
       display: none;
-      animation: shake 0.5s ease;
+      line-height: 1.5;
     }
-    .error.show { display: block; }
+    .error {
+      background: linear-gradient(135deg, rgba(255, 68, 68, 0.15), rgba(255, 68, 68, 0.05));
+      border: 1px solid rgba(255, 68, 68, 0.3);
+      color: #ff8888;
+    }
+    .error.show { display: block; animation: shake 0.5s ease; }
+    .info {
+      background: linear-gradient(135deg, rgba(0, 170, 255, 0.15), rgba(0, 170, 255, 0.05));
+      border: 1px solid rgba(0, 170, 255, 0.3);
+      color: #66ccff;
+    }
+    .info.show { display: block; animation: fadeUp 0.5s ease; }
     @keyframes shake {
       0%, 100% { transform: translateX(0); }
       25% { transform: translateX(-10px); }
@@ -147,8 +155,7 @@
     button:hover:not(:disabled) { transform: translateY(-3px); box-shadow: 0 20px 60px rgba(0, 255, 136, 0.5); }
     button:disabled { background: #444; color: #888; cursor: not-allowed; transform: none; box-shadow: none; }
     .link { text-align: center; margin-top: 24px; color: #666; font-size: 13px; }
-    .link a { color: #00ff88; text-decoration: none; font-weight: 700; transition: all 0.3s; }
-    .link a:hover { text-shadow: 0 0 20px rgba(0, 255, 136, 0.5); }
+    .link a { color: #00ff88; text-decoration: none; font-weight: 700; }
     .footer {
       text-align: center;
       margin-top: 32px;
@@ -171,6 +178,7 @@
     <p class="subtitle">Script Protection System</p>
 
     <div class="error" id="error"></div>
+    <div class="info" id="info"></div>
 
     <form id="loginForm">
       <label>Name</label>
@@ -190,39 +198,105 @@
   </div>
 
   <script>
+    const API_BASE = window.location.origin;
+
+    // Auto-redirect kung naka-login na
     if (localStorage.getItem('zk_token')) {
       window.location.href = '/dashboard.html';
+    }
+
+    // I-load ang huling nagamit na name (persistence)
+    const lastName = localStorage.getItem('zk_last_name');
+    if (lastName) {
+      document.getElementById('name').value = lastName;
+    }
+
+    async function warmupServer() {
+      try {
+        const info = document.getElementById('info');
+        info.textContent = '⏳ Waking up server...';
+        info.classList.add('show');
+        
+        await fetch(API_BASE + '/api/list', { 
+          method: 'GET',
+          headers: { 'Cache-Control': 'no-cache' }
+        });
+        
+        info.classList.remove('show');
+      } catch (err) {
+        document.getElementById('info').classList.remove('show');
+      }
+    }
+
+    async function fetchWithRetry(url, options, retries = 2) {
+      for (let i = 0; i < retries; i++) {
+        try {
+          const res = await fetch(url, options);
+          return res;
+        } catch (err) {
+          if (i === retries - 1) throw err;
+          await new Promise(r => setTimeout(r, 3000));
+        }
+      }
     }
 
     document.getElementById('loginForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const btn = document.getElementById('submitBtn');
       const errorBox = document.getElementById('error');
+      const infoBox = document.getElementById('info');
+      
       btn.disabled = true;
       btn.textContent = '⏳ Loading...';
       errorBox.classList.remove('show');
+      infoBox.classList.remove('show');
+
+      const nameValue = document.getElementById('name').value.trim();
+      const passwordValue = document.getElementById('password').value;
+
+      // Save name for next time
+      localStorage.setItem('zk_last_name', nameValue);
 
       try {
-        const res = await fetch('/api/login', {
+        infoBox.textContent = '⏳ Connecting to server...';
+        infoBox.classList.add('show');
+
+        const res = await fetchWithRetry(API_BASE + '/api/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: document.getElementById('name').value.trim(),
-            password: document.getElementById('password').value
-          })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Login failed');
+          body: JSON.stringify({ name: nameValue, password: passwordValue })
+        }, 3);
 
+        infoBox.classList.remove('show');
+        const data = await res.json();
+
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Login failed');
+        }
+
+        // Save credentials
         localStorage.setItem('zk_token', data.token);
         localStorage.setItem('zk_user', JSON.stringify(data.user));
+        localStorage.setItem('zk_last_name', nameValue);
+
         window.location.href = '/dashboard.html';
       } catch (err) {
-        errorBox.textContent = '❌ ' + err.message;
+        infoBox.classList.remove('show');
+        let errorMsg = err.message;
+        
+        if (err.message === 'fetch failed' || err.message.includes('Failed to fetch')) {
+          errorMsg = 'Hindi maka-connect sa server. Nag-sleep ang Render server (free tier). Hintayin 30-60 seconds at i-try ulit.';
+        }
+        
+        errorBox.textContent = '❌ ' + errorMsg;
         errorBox.classList.add('show');
         btn.disabled = false;
         btn.textContent = '🔐 Login';
       }
+    });
+
+    window.addEventListener('load', () => {
+      warmupServer();
     });
   </script>
 </body>
