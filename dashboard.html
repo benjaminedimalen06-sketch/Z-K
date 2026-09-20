@@ -210,9 +210,11 @@
   <div class="toast" id="toast"></div>
 
   <script>
+    const API_BASE = window.location.origin;
     const token = localStorage.getItem('zk_token');
     const user = JSON.parse(localStorage.getItem('zk_user') || 'null');
 
+    // Auto-redirect kung walang token
     if (!token || !user) {
       window.location.href = '/';
     }
@@ -226,6 +228,7 @@
     document.getElementById('logoutBtn').addEventListener('click', () => {
       localStorage.removeItem('zk_token');
       localStorage.removeItem('zk_user');
+      // HUWAG burahin ang zk_last_name para manatili ang name sa login page
       window.location.href = '/';
     });
 
@@ -242,14 +245,35 @@
       return div.innerHTML;
     }
 
+    async function fetchWithRetry(url, options, retries = 2) {
+      for (let i = 0; i < retries; i++) {
+        try {
+          const res = await fetch(url, options);
+          return res;
+        } catch (err) {
+          if (i === retries - 1) throw err;
+          await new Promise(r => setTimeout(r, 2000));
+        }
+      }
+    }
+
     async function loadScripts() {
       const list = document.getElementById('scriptsList');
       list.innerHTML = '<div class="empty-state"><h3>Loading...</h3></div>';
 
       try {
-        const res = await fetch('/api/list', {
+        const res = await fetchWithRetry(API_BASE + '/api/list', {
           headers: { 'Authorization': 'Bearer ' + token }
         });
+
+        // Kung expired ang token
+        if (res.status === 401) {
+          localStorage.removeItem('zk_token');
+          localStorage.removeItem('zk_user');
+          window.location.href = '/';
+          return;
+        }
+
         const data = await res.json();
 
         if (!data.scripts) {
@@ -295,8 +319,9 @@
               </div>
             </div>
             <div class="script-actions">
-              <button class="icon-btn" onclick="showLoadstring('${s.public_link}')" title="Get Loadstring">📋 Loadstring</button>
-              <button class="icon-btn" onclick="window.open('/api/raw?id=${s.public_link}', '_blank')" title="View">👁️</button>
+              <button class="icon-btn" onclick="showLoadstring('${s.public_link}')" title="Loadstring">📋</button>
+              <button class="icon-btn" onclick="copyRaw('${s.public_link}')" title="Copy Raw URL">🔗</button>
+              <button class="icon-btn" onclick="window.open('/raw.html?id=${s.public_link}', '_blank')" title="View Raw">👁️</button>
               <button class="icon-btn" onclick="window.location.href='/editor.html?id=${s.id}'" title="Edit">✏️</button>
               <button class="icon-btn danger" onclick="deleteScript('${s.id}', '${escapeHtml(s.title).replace(/'/g, "\\'")}')" title="Delete">🗑️</button>
             </div>
@@ -308,10 +333,18 @@
     }
 
     function showLoadstring(link) {
-      const baseUrl = window.location.origin;
-      const loadstring = `loadstring(game:HttpGet("${baseUrl}/api/raw?id=${link}"))()`;
+      const loadstring = `loadstring(game:HttpGet("${API_BASE}/api/raw?id=${link}"))()`;
       document.getElementById('loadstringText').textContent = loadstring;
       document.getElementById('loadstringModal').classList.add('show');
+    }
+
+    function copyRaw(link) {
+      const rawUrl = `${API_BASE}/api/raw?id=${link}`;
+      navigator.clipboard.writeText(rawUrl).then(() => {
+        showToast('✅ Raw URL copied!');
+      }).catch(() => {
+        showToast('❌ Failed to copy', true);
+      });
     }
 
     function closeModal() {
@@ -336,7 +369,7 @@
       if (!confirm(`Delete "${title}"? Hindi na ito maibabalik.`)) return;
 
       try {
-        const res = await fetch('/api/delete', {
+        const res = await fetch(API_BASE + '/api/delete', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
