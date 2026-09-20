@@ -46,7 +46,7 @@ function isExecutorRequest(req) {
 }
 
 // ============================================
-// 🎯 API ROUTES (JSON responses)
+// API ROUTES (JSON)
 // ============================================
 
 app.post('/api/register', async (req, res) => {
@@ -292,7 +292,7 @@ app.post('/api/admin/set-role', async (req, res) => {
 });
 
 // ============================================
-// 🎯 RAW ENDPOINT (PROTECTION SYSTEM)
+// RAW ENDPOINT (PROTECTION)
 // ============================================
 
 app.get('/api/raw', async (req, res) => {
@@ -574,7 +574,7 @@ app.get('/api/get-script', async (req, res) => {
 });
 
 // ============================================
-// 🎯 SERVE HTML FILES
+// SERVE HTML
 // ============================================
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
@@ -586,7 +586,6 @@ app.get('/admin.html', (req, res) => res.sendFile(path.join(__dirname, 'admin.ht
 app.get('/raw.html', (req, res) => res.sendFile(path.join(__dirname, 'raw.html')));
 app.get('/raw/:id', (req, res) => res.redirect(`/raw.html?id=${req.params.id}`));
 
-// Static files (CSS, JS, images) — dapat nasa huli para hindi mag-intercept ng API
 app.use(express.static(__dirname));
 
 app.listen(PORT, '0.0.0.0', () => {
