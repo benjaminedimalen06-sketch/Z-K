@@ -171,7 +171,6 @@
       color: #444;
       font-size: 11px;
     }
-    /* LOADING OVERLAY */
     .loading-overlay {
       position: fixed;
       top: 0; left: 0; right: 0; bottom: 0;
@@ -318,7 +317,7 @@
         const contentType = res.headers.get('content-type') || '';
         if (!contentType.includes('application/json')) {
           hideLoading();
-          throw new Error('Server error: hindi JSON ang response. Subukan ulit mamaya.');
+          throw new Error('Server error: hindi JSON ang response');
         }
 
         const data = await res.json();
@@ -328,7 +327,6 @@
           throw new Error(data.error || 'Registration failed');
         }
 
-        // I-save ang name para sa auto-fill sa login page
         localStorage.setItem('zk_last_name', name);
 
         showLoading('ACCOUNT CREATED!', 'Redirecting to login...');
@@ -341,7 +339,7 @@
         hideLoading();
         let errorMsg = err.message;
         if (err.message === 'fetch failed' || err.message.includes('Failed to fetch')) {
-          errorMsg = 'Hindi maka-connect sa server. Nag-sleep ang Render (free tier). Hintayin 30-60s at i-try ulit.';
+          errorMsg = 'Hindi maka-connect sa server. Hintayin 30-60s at i-try ulit.';
         }
         showError(errorMsg);
         btn.disabled = false;
@@ -349,7 +347,6 @@
       }
     });
 
-    // Warmup server on load
     window.addEventListener('load', () => {
       fetch(API_BASE + '/api/list').catch(() => {});
     });
