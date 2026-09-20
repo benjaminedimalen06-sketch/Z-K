@@ -83,7 +83,7 @@
       text-transform: uppercase;
       margin-bottom: 40px;
     }
-    .error, .info {
+    .error, .success, .info {
       padding: 14px 20px;
       border-radius: 12px;
       margin-bottom: 20px;
@@ -98,6 +98,12 @@
       color: #ff8888;
     }
     .error.show { display: block; animation: shake 0.5s ease; }
+    .success {
+      background: linear-gradient(135deg, rgba(0, 255, 136, 0.15), rgba(0, 255, 136, 0.05));
+      border: 1px solid rgba(0, 255, 136, 0.3);
+      color: #00ff88;
+    }
+    .success.show { display: block; animation: fadeUp 0.5s ease; }
     .info {
       background: linear-gradient(135deg, rgba(0, 170, 255, 0.15), rgba(0, 170, 255, 0.05));
       border: 1px solid rgba(0, 170, 255, 0.3);
@@ -164,11 +170,50 @@
       color: #444;
       font-size: 11px;
     }
+    /* LOADING OVERLAY */
+    .loading-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(5, 5, 5, 0.95);
+      backdrop-filter: blur(20px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      z-index: 9999;
+    }
+    .loading-overlay.show { display: flex; }
+    .loading-spinner {
+      width: 60px; height: 60px;
+      border: 4px solid rgba(0, 255, 136, 0.2);
+      border-top-color: #00ff88;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-bottom: 24px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text {
+      color: #00ff88;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 2px;
+    }
+    .loading-subtext {
+      color: #666;
+      font-size: 13px;
+      margin-top: 8px;
+    }
   </style>
 </head>
 <body>
   <div class="orb orb-1"></div>
   <div class="orb orb-2"></div>
+
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-spinner"></div>
+    <div class="loading-text" id="loadingText">LOGGING IN...</div>
+    <div class="loading-subtext" id="loadingSubtext">Please wait</div>
+  </div>
 
   <div class="container">
     <div class="logo">
@@ -200,42 +245,52 @@
   <script>
     const API_BASE = window.location.origin;
 
-    // Auto-redirect kung naka-login na
+    // AUTO-REDIRECT kung naka-login na
     if (localStorage.getItem('zk_token')) {
       window.location.href = '/dashboard.html';
     }
 
-    // I-load ang huling nagamit na name (persistence)
+    // AUTO-FILL ng last registered name
     const lastName = localStorage.getItem('zk_last_name');
     if (lastName) {
       document.getElementById('name').value = lastName;
     }
 
-    async function warmupServer() {
-      try {
-        const info = document.getElementById('info');
-        info.textContent = '⏳ Waking up server...';
-        info.classList.add('show');
-        
-        await fetch(API_BASE + '/api/list', { 
-          method: 'GET',
-          headers: { 'Cache-Control': 'no-cache' }
-        });
-        
-        info.classList.remove('show');
-      } catch (err) {
-        document.getElementById('info').classList.remove('show');
-      }
+    function showError(msg) {
+      const errorBox = document.getElementById('error');
+      errorBox.textContent = '❌ ' + msg;
+      errorBox.classList.add('show');
+      setTimeout(() => errorBox.classList.remove('show'), 6000);
     }
 
-    async function fetchWithRetry(url, options, retries = 2) {
+    function showInfo(msg) {
+      const infoBox = document.getElementById('info');
+      infoBox.textContent = '⏳ ' + msg;
+      infoBox.classList.add('show');
+    }
+
+    function hideInfo() {
+      document.getElementById('info').classList.remove('show');
+    }
+
+    function showLoading(text, subtext) {
+      document.getElementById('loadingText').textContent = text;
+      document.getElementById('loadingSubtext').textContent = subtext || '';
+      document.getElementById('loadingOverlay').classList.add('show');
+    }
+
+    function hideLoading() {
+      document.getElementById('loadingOverlay').classList.remove('show');
+    }
+
+    async function fetchWithRetry(url, options, retries = 3) {
       for (let i = 0; i < retries; i++) {
         try {
           const res = await fetch(url, options);
           return res;
         } catch (err) {
           if (i === retries - 1) throw err;
-          await new Promise(r => setTimeout(r, 3000));
+          await new Promise(r => setTimeout(r, 2000));
         }
       }
     }
@@ -243,60 +298,62 @@
     document.getElementById('loginForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const btn = document.getElementById('submitBtn');
-      const errorBox = document.getElementById('error');
-      const infoBox = document.getElementById('info');
       
+      const name = document.getElementById('name').value.trim();
+      const password = document.getElementById('password').value;
+
+      if (!name || !password) return showError('Fill all fields');
+
       btn.disabled = true;
-      btn.textContent = '⏳ Loading...';
-      errorBox.classList.remove('show');
-      infoBox.classList.remove('show');
-
-      const nameValue = document.getElementById('name').value.trim();
-      const passwordValue = document.getElementById('password').value;
-
-      // Save name for next time
-      localStorage.setItem('zk_last_name', nameValue);
+      btn.textContent = '⏳ Logging in...';
+      
+      showLoading('LOGGING IN...', 'Connecting to server');
 
       try {
-        infoBox.textContent = '⏳ Connecting to server...';
-        infoBox.classList.add('show');
-
         const res = await fetchWithRetry(API_BASE + '/api/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: nameValue, password: passwordValue })
+          body: JSON.stringify({ name, password })
         }, 3);
 
-        infoBox.classList.remove('show');
+        const contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+          hideLoading();
+          throw new Error('Server error: hindi JSON ang response. Subukan ulit mamaya.');
+        }
+
         const data = await res.json();
 
         if (!res.ok || !data.success) {
+          hideLoading();
           throw new Error(data.error || 'Login failed');
         }
 
-        // Save credentials
+        // I-save ang credentials para auto-login sa susunod
         localStorage.setItem('zk_token', data.token);
         localStorage.setItem('zk_user', JSON.stringify(data.user));
-        localStorage.setItem('zk_last_name', nameValue);
+        localStorage.setItem('zk_last_name', name);
 
-        window.location.href = '/dashboard.html';
+        showLoading('WELCOME BACK!', 'Redirecting to dashboard...');
+
+        setTimeout(() => {
+          window.location.href = '/dashboard.html';
+        }, 1200);
       } catch (err) {
-        infoBox.classList.remove('show');
+        hideLoading();
         let errorMsg = err.message;
-        
         if (err.message === 'fetch failed' || err.message.includes('Failed to fetch')) {
-          errorMsg = 'Hindi maka-connect sa server. Nag-sleep ang Render server (free tier). Hintayin 30-60 seconds at i-try ulit.';
+          errorMsg = 'Hindi maka-connect sa server. Nag-sleep ang Render (free tier). Hintayin 30-60s at i-try ulit.';
         }
-        
-        errorBox.textContent = '❌ ' + errorMsg;
-        errorBox.classList.add('show');
+        showError(errorMsg);
         btn.disabled = false;
         btn.textContent = '🔐 Login';
       }
     });
 
+    // Warmup server on load
     window.addEventListener('load', () => {
-      warmupServer();
+      fetch(API_BASE + '/api/list').catch(() => {});
     });
   </script>
 </body>
