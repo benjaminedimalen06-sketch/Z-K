@@ -218,29 +218,26 @@
     async function warmupServer() {
       try {
         const info = document.getElementById('info');
-        info.textContent = '⏳ Waking up server... (this may take 30-60s on first load)';
+        info.textContent = '⏳ Waking up server...';
         info.classList.add('show');
         
-        const res = await fetch(API_BASE + '/api/list', { 
+        await fetch(API_BASE + '/api/list', { 
           method: 'GET',
           headers: { 'Cache-Control': 'no-cache' }
         });
+        
         info.classList.remove('show');
-        return true;
       } catch (err) {
-        console.log('Warmup failed:', err);
         document.getElementById('info').classList.remove('show');
-        return false;
       }
     }
 
-    async function fetchWithRetry(url, options, retries = 2) {
+    async function fetchWithRetry(url, options, retries = 3) {
       for (let i = 0; i < retries; i++) {
         try {
           const res = await fetch(url, options);
           return res;
         } catch (err) {
-          console.log(`Attempt ${i + 1} failed:`, err);
           if (i === retries - 1) throw err;
           await new Promise(r => setTimeout(r, 3000));
         }
@@ -278,6 +275,13 @@
         }, 3);
 
         infoBox.classList.remove('show');
+
+        // I-check kung JSON ang response
+        const contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+          throw new Error('Server error: hindi JSON ang response. I-check ang Render logs.');
+        }
+
         const data = await res.json();
 
         if (!res.ok || !data.success) {
@@ -286,6 +290,7 @@
 
         successBox.textContent = '✅ Account created! Redirecting to login...';
         successBox.classList.add('show');
+        localStorage.setItem('zk_last_name', payload.name);
         setTimeout(() => window.location.href = '/', 1500);
       } catch (err) {
         infoBox.classList.remove('show');
@@ -302,7 +307,6 @@
       }
     });
 
-    // Warmup server on page load
     window.addEventListener('load', () => {
       warmupServer();
     });
