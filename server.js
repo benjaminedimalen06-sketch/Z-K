@@ -16,7 +16,6 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
-app.use(express.static(__dirname));
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -46,10 +45,10 @@ function isExecutorRequest(req) {
   return false;
 }
 
-app.get('/favicon.ico', (req, res) => res.status(204).end());
-app.get('/favicon.svg', (req, res) => res.status(204).end());
+// ============================================
+// 🎯 API ROUTES (JSON responses)
+// ============================================
 
-// ===== REGISTER =====
 app.post('/api/register', async (req, res) => {
   try {
     const { name, gmail, password, age } = req.body;
@@ -81,7 +80,6 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-// ===== LOGIN =====
 app.post('/api/login', async (req, res) => {
   try {
     const { name, password } = req.body;
@@ -104,7 +102,6 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// ===== UPLOAD =====
 app.post('/api/upload', async (req, res) => {
   const auth = req.headers.authorization;
   if (!auth?.startsWith('Bearer ')) return res.status(401).json({ error: 'Not logged in' });
@@ -128,7 +125,6 @@ app.post('/api/upload', async (req, res) => {
   }
 });
 
-// ===== LIST =====
 app.get('/api/list', async (req, res) => {
   const auth = req.headers.authorization;
   if (!auth?.startsWith('Bearer ')) return res.status(401).json({ error: 'Not logged in' });
@@ -146,7 +142,159 @@ app.get('/api/list', async (req, res) => {
   }
 });
 
-// ===== RAW (PROTECTION SYSTEM) =====
+app.post('/api/delete', async (req, res) => {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith('Bearer ')) return res.status(401).json({ error: 'Not logged in' });
+  let user;
+  try { user = jwt.verify(auth.slice(7), JWT_SECRET); } catch { return res.status(401).json({ error: 'Invalid token' }); }
+
+  try {
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'ID required' });
+    const { data: script } = await supabase.from('scripts').select('user_id').eq('id', id).single();
+    if (!script) return res.status(404).json({ error: 'Not found' });
+    if (user.role !== 'owner' && script.user_id !== user.id) return res.status(403).json({ error: 'Forbidden' });
+
+    const { error } = await supabase.from('scripts').delete().eq('id', id);
+    if (error) return res.status(500).json({ error: error.message });
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/edit', async (req, res) => {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith('Bearer ')) return res.status(401).json({ error: 'Not logged in' });
+  let user;
+  try { user = jwt.verify(auth.slice(7), JWT_SECRET); } catch { return res.status(401).json({ error: 'Invalid token' }); }
+
+  try {
+    const { id, title, content, access_type, whitelist } = req.body;
+    if (!id) return res.status(400).json({ error: 'ID required' });
+    const { data: script } = await supabase.from('scripts').select('user_id').eq('id', id).single();
+    if (!script) return res.status(404).json({ error: 'Not found' });
+    if (user.role !== 'owner' && script.user_id !== user.id) return res.status(403).json({ error: 'Forbidden' });
+
+    const updates = { updated_at: new Date().toISOString() };
+    if (title) updates.title = title;
+    if (content) updates.content = content;
+    if (access_type) updates.access_type = access_type;
+    if (whitelist !== undefined) updates.whitelist = whitelist;
+
+    const { data, error } = await supabase.from('scripts').update(updates).eq('id', id).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    return res.status(200).json({ success: true, script: data });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/single', async (req, res) => {
+  const { id } = req.query;
+  if (!id) return res.status(400).json({ error: 'ID required' });
+  const { data, error } = await supabase.from('scripts')
+    .select('id, title, content, public_link, access_type, whitelist, created_at, updated_at').eq('id', id).maybeSingle();
+  if (error || !data) return res.status(404).json({ error: 'Not found' });
+  return res.status(200).json({ script: data });
+});
+
+app.get('/api/admin/users', async (req, res) => {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith('Bearer ')) return res.status(401).json({ error: 'Not logged in' });
+  let user;
+  try { user = jwt.verify(auth.slice(7), JWT_SECRET); } catch { return res.status(401).json({ error: 'Invalid token' }); }
+  if (user.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+
+  try {
+    const { data: users, error } = await supabase.from('users')
+      .select('id, name, gmail, age, role, created_at').order('created_at', { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+
+    const { data: scripts } = await supabase.from('scripts').select('user_id');
+    const scriptCount = {};
+    (scripts || []).forEach(s => { scriptCount[s.user_id] = (scriptCount[s.user_id] || 0) + 1; });
+    const usersWithCounts = users.map(u => ({ ...u, script_count: scriptCount[u.id] || 0 }));
+    return res.status(200).json({ users: usersWithCounts });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/admin/scripts', async (req, res) => {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith('Bearer ')) return res.status(401).json({ error: 'Not logged in' });
+  let user;
+  try { user = jwt.verify(auth.slice(7), JWT_SECRET); } catch { return res.status(401).json({ error: 'Invalid token' }); }
+  if (user.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+
+  try {
+    const { data: scripts, error } = await supabase.from('scripts')
+      .select('id, title, public_link, user_id, access_type, created_at, updated_at').order('created_at', { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+
+    const userIds = [...new Set((scripts || []).map(s => s.user_id).filter(Boolean))];
+    let userMap = {};
+    if (userIds.length > 0) {
+      const { data: users } = await supabase.from('users').select('id, name, gmail').in('id', userIds);
+      (users || []).forEach(u => { userMap[u.id] = u; });
+    }
+    const scriptsWithOwner = (scripts || []).map(s => ({
+      ...s,
+      owner_name: userMap[s.user_id]?.name || 'unknown',
+      owner_gmail: userMap[s.user_id]?.gmail || 'unknown'
+    }));
+    return res.status(200).json({ scripts: scriptsWithOwner });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/delete-user', async (req, res) => {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith('Bearer ')) return res.status(401).json({ error: 'Not logged in' });
+  let user;
+  try { user = jwt.verify(auth.slice(7), JWT_SECRET); } catch { return res.status(401).json({ error: 'Invalid token' }); }
+  if (user.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+
+  try {
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ error: 'User ID required' });
+    if (userId === user.id) return res.status(400).json({ error: 'Cannot delete yourself' });
+
+    const { error } = await supabase.from('users').delete().eq('id', userId);
+    if (error) return res.status(500).json({ error: error.message });
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/set-role', async (req, res) => {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith('Bearer ')) return res.status(401).json({ error: 'Not logged in' });
+  let user;
+  try { user = jwt.verify(auth.slice(7), JWT_SECRET); } catch { return res.status(401).json({ error: 'Invalid token' }); }
+  if (user.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+
+  try {
+    const { userId, role } = req.body;
+    if (!userId || !role) return res.status(400).json({ error: 'Missing fields' });
+    if (!['user', 'owner'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+    if (userId === user.id) return res.status(400).json({ error: 'Cannot change your own role' });
+
+    const { error } = await supabase.from('users').update({ role }).eq('id', userId);
+    if (error) return res.status(500).json({ error: error.message });
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================
+// 🎯 RAW ENDPOINT (PROTECTION SYSTEM)
+// ============================================
+
 app.get('/api/raw', async (req, res) => {
   const { id } = req.query;
   if (!id) return res.send(`-- Invalid Link`);
@@ -401,7 +549,6 @@ end
   `);
 });
 
-// ===== GET-SCRIPT (Whitelist check) =====
 app.get('/api/get-script', async (req, res) => {
   const { id, userid } = req.query;
   if (!id) return res.status(400).send('-- Invalid');
@@ -426,169 +573,21 @@ app.get('/api/get-script', async (req, res) => {
   return res.status(200).send(script.content);
 });
 
-// ===== DELETE =====
-app.post('/api/delete', async (req, res) => {
-  const auth = req.headers.authorization;
-  if (!auth?.startsWith('Bearer ')) return res.status(401).json({ error: 'Not logged in' });
-  let user;
-  try { user = jwt.verify(auth.slice(7), JWT_SECRET); } catch { return res.status(401).json({ error: 'Invalid token' }); }
+// ============================================
+// 🎯 SERVE HTML FILES
+// ============================================
 
-  try {
-    const { id } = req.body;
-    if (!id) return res.status(400).json({ error: 'ID required' });
-    const { data: script } = await supabase.from('scripts').select('user_id').eq('id', id).single();
-    if (!script) return res.status(404).json({ error: 'Not found' });
-    if (user.role !== 'owner' && script.user_id !== user.id) return res.status(403).json({ error: 'Forbidden' });
-
-    const { error } = await supabase.from('scripts').delete().eq('id', id);
-    if (error) return res.status(500).json({ error: error.message });
-    return res.status(200).json({ success: true });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-// ===== EDIT =====
-app.post('/api/edit', async (req, res) => {
-  const auth = req.headers.authorization;
-  if (!auth?.startsWith('Bearer ')) return res.status(401).json({ error: 'Not logged in' });
-  let user;
-  try { user = jwt.verify(auth.slice(7), JWT_SECRET); } catch { return res.status(401).json({ error: 'Invalid token' }); }
-
-  try {
-    const { id, title, content, access_type, whitelist } = req.body;
-    if (!id) return res.status(400).json({ error: 'ID required' });
-    const { data: script } = await supabase.from('scripts').select('user_id').eq('id', id).single();
-    if (!script) return res.status(404).json({ error: 'Not found' });
-    if (user.role !== 'owner' && script.user_id !== user.id) return res.status(403).json({ error: 'Forbidden' });
-
-    const updates = { updated_at: new Date().toISOString() };
-    if (title) updates.title = title;
-    if (content) updates.content = content;
-    if (access_type) updates.access_type = access_type;
-    if (whitelist !== undefined) updates.whitelist = whitelist;
-
-    const { data, error } = await supabase.from('scripts').update(updates).eq('id', id).select().single();
-    if (error) return res.status(500).json({ error: error.message });
-    return res.status(200).json({ success: true, script: data });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-// ===== SINGLE =====
-app.get('/api/single', async (req, res) => {
-  const { id } = req.query;
-  if (!id) return res.status(400).json({ error: 'ID required' });
-  const { data, error } = await supabase.from('scripts')
-    .select('id, title, content, public_link, access_type, whitelist, created_at, updated_at').eq('id', id).maybeSingle();
-  if (error || !data) return res.status(404).json({ error: 'Not found' });
-  return res.status(200).json({ script: data });
-});
-
-// ===== ADMIN: USERS =====
-app.get('/api/admin/users', async (req, res) => {
-  const auth = req.headers.authorization;
-  if (!auth?.startsWith('Bearer ')) return res.status(401).json({ error: 'Not logged in' });
-  let user;
-  try { user = jwt.verify(auth.slice(7), JWT_SECRET); } catch { return res.status(401).json({ error: 'Invalid token' }); }
-  if (user.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
-
-  try {
-    const { data: users, error } = await supabase.from('users')
-      .select('id, name, gmail, age, role, created_at').order('created_at', { ascending: false });
-    if (error) return res.status(500).json({ error: error.message });
-
-    const { data: scripts } = await supabase.from('scripts').select('user_id');
-    const scriptCount = {};
-    (scripts || []).forEach(s => { scriptCount[s.user_id] = (scriptCount[s.user_id] || 0) + 1; });
-    const usersWithCounts = users.map(u => ({ ...u, script_count: scriptCount[u.id] || 0 }));
-    return res.status(200).json({ users: usersWithCounts });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-// ===== ADMIN: ALL SCRIPTS =====
-app.get('/api/admin/scripts', async (req, res) => {
-  const auth = req.headers.authorization;
-  if (!auth?.startsWith('Bearer ')) return res.status(401).json({ error: 'Not logged in' });
-  let user;
-  try { user = jwt.verify(auth.slice(7), JWT_SECRET); } catch { return res.status(401).json({ error: 'Invalid token' }); }
-  if (user.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
-
-  try {
-    const { data: scripts, error } = await supabase.from('scripts')
-      .select('id, title, public_link, user_id, access_type, created_at, updated_at').order('created_at', { ascending: false });
-    if (error) return res.status(500).json({ error: error.message });
-
-    const userIds = [...new Set((scripts || []).map(s => s.user_id).filter(Boolean))];
-    let userMap = {};
-    if (userIds.length > 0) {
-      const { data: users } = await supabase.from('users').select('id, name, gmail').in('id', userIds);
-      (users || []).forEach(u => { userMap[u.id] = u; });
-    }
-    const scriptsWithOwner = (scripts || []).map(s => ({
-      ...s,
-      owner_name: userMap[s.user_id]?.name || 'unknown',
-      owner_gmail: userMap[s.user_id]?.gmail || 'unknown'
-    }));
-    return res.status(200).json({ scripts: scriptsWithOwner });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-// ===== ADMIN: DELETE USER =====
-app.post('/api/admin/delete-user', async (req, res) => {
-  const auth = req.headers.authorization;
-  if (!auth?.startsWith('Bearer ')) return res.status(401).json({ error: 'Not logged in' });
-  let user;
-  try { user = jwt.verify(auth.slice(7), JWT_SECRET); } catch { return res.status(401).json({ error: 'Invalid token' }); }
-  if (user.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
-
-  try {
-    const { userId } = req.body;
-    if (!userId) return res.status(400).json({ error: 'User ID required' });
-    if (userId === user.id) return res.status(400).json({ error: 'Cannot delete yourself' });
-
-    const { error } = await supabase.from('users').delete().eq('id', userId);
-    if (error) return res.status(500).json({ error: error.message });
-    return res.status(200).json({ success: true });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-// ===== ADMIN: SET ROLE =====
-app.post('/api/admin/set-role', async (req, res) => {
-  const auth = req.headers.authorization;
-  if (!auth?.startsWith('Bearer ')) return res.status(401).json({ error: 'Not logged in' });
-  let user;
-  try { user = jwt.verify(auth.slice(7), JWT_SECRET); } catch { return res.status(401).json({ error: 'Invalid token' }); }
-  if (user.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
-
-  try {
-    const { userId, role } = req.body;
-    if (!userId || !role) return res.status(400).json({ error: 'Missing fields' });
-    if (!['user', 'owner'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
-    if (userId === user.id) return res.status(400).json({ error: 'Cannot change your own role' });
-
-    const { error } = await supabase.from('users').update({ role }).eq('id', userId);
-    if (error) return res.status(500).json({ error: error.message });
-    return res.status(200).json({ success: true });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-// ===== SERVE HTML =====
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/login.html', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/register.html', (req, res) => res.sendFile(path.join(__dirname, 'register.html')));
 app.get('/dashboard.html', (req, res) => res.sendFile(path.join(__dirname, 'dashboard.html')));
 app.get('/editor.html', (req, res) => res.sendFile(path.join(__dirname, 'editor.html')));
 app.get('/admin.html', (req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
+app.get('/raw.html', (req, res) => res.sendFile(path.join(__dirname, 'raw.html')));
+app.get('/raw/:id', (req, res) => res.redirect(`/raw.html?id=${req.params.id}`));
+
+// Static files (CSS, JS, images) — dapat nasa huli para hindi mag-intercept ng API
+app.use(express.static(__dirname));
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Z-K server running on port ${PORT}`);
